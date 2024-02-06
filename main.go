@@ -43,24 +43,47 @@ func mainE(w io.Writer, r io.Reader) error {
 		children[span.Parent.SpanID] = kids
 	}
 
+	missing := map[string]struct{}{}
+
+	for parent := range children {
+		if _, ok := spans[parent]; !ok {
+			missing[parent] = struct{}{}
+		}
+	}
+	for missed := range missing {
+		log.Printf("missing %q", missed)
+	}
+
 	// TODO: This feels not right.
 	rootSpans, ok := children["0000000000000000"]
 	if !ok {
-		return fmt.Errorf("no root")
+		log.Printf("no root")
 	}
-
-	if len(rootSpans) != 1 {
-		panic(fmt.Errorf("%d root spans", len(rootSpans)))
-	}
-
-	root := &Node{
-		Span: rootSpans[0],
-	}
-
-	buildTree(root, children, spans)
 
 	fmt.Fprint(w, header)
-	writeSpan(w, nil, root)
+	for _, rootSpan := range rootSpans {
+		root := &Node{
+			Span: rootSpan,
+		}
+
+		buildTree(root, children, spans)
+
+		writeSpan(w, nil, root)
+	}
+	for missed := range missing {
+		root := &Node{
+			Span: &Span{
+				Name: "Missing span",
+				SpanContext: SpanContext{
+					SpanID: missed,
+				},
+			},
+		}
+
+		buildTree(root, children, spans)
+
+		writeSpan(w, nil, root)
+	}
 	fmt.Fprint(w, footer)
 	return nil
 }
@@ -83,6 +106,15 @@ func buildTree(root *Node, children map[string][]*Span, spans map[string]*Span) 
 	slices.SortFunc(root.Children, func(a, b *Node) int {
 		return a.Span.StartTime.Compare(b.Span.StartTime)
 	})
+
+	if root.Span.StartTime == root.Span.EndTime {
+		root.Span.StartTime = root.Children[0].Span.StartTime
+
+		last := slices.MaxFunc(root.Children, func(a, b *Node) int {
+			return a.Span.EndTime.Compare(b.Span.EndTime)
+		})
+		root.Span.EndTime = last.Span.EndTime
+	}
 }
 
 func writeSpan(w io.Writer, parent, node *Node) {
@@ -155,17 +187,19 @@ type Node struct {
 	Children []*Node
 }
 
+type SpanContext struct {
+	TraceID    string `json:"TraceID"`
+	SpanID     string `json:"SpanID"`
+	TraceFlags string `json:"TraceFlags"`
+	TraceState string `json:"TraceState"`
+	Remote     bool   `json:"Remote"`
+}
+
 // Thank you mholt.
 type Span struct {
-	Name        string `json:"Name"`
-	SpanContext struct {
-		TraceID    string `json:"TraceID"`
-		SpanID     string `json:"SpanID"`
-		TraceFlags string `json:"TraceFlags"`
-		TraceState string `json:"TraceState"`
-		Remote     bool   `json:"Remote"`
-	} `json:"SpanContext"`
-	Parent struct {
+	Name        string      `json:"Name"`
+	SpanContext SpanContext `json:"SpanContext"`
+	Parent      struct {
 		TraceID    string `json:"TraceID"`
 		SpanID     string `json:"SpanID"`
 		TraceFlags string `json:"TraceFlags"`
