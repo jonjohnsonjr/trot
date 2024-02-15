@@ -58,6 +58,21 @@ func mainE(w io.Writer, r io.Reader) error {
 	rootSpans, ok := children["0000000000000000"]
 	if !ok {
 		log.Printf("no root")
+
+		for missed := range missing {
+			root := &Node{
+				Span: &Span{
+					Name: "Missing span",
+					SpanContext: SpanContext{
+						SpanID: missed,
+					},
+				},
+			}
+
+			buildTree(root, children, spans)
+
+			writeSpan(w, nil, root)
+		}
 	}
 
 	fmt.Fprint(w, header)
@@ -70,20 +85,7 @@ func mainE(w io.Writer, r io.Reader) error {
 
 		writeSpan(w, nil, root)
 	}
-	for missed := range missing {
-		root := &Node{
-			Span: &Span{
-				Name: "Missing span",
-				SpanContext: SpanContext{
-					SpanID: missed,
-				},
-			},
-		}
 
-		buildTree(root, children, spans)
-
-		writeSpan(w, nil, root)
-	}
 	fmt.Fprint(w, footer)
 	return nil
 }
