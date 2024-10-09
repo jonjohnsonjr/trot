@@ -22,15 +22,18 @@ func mainE(w io.Writer, r io.Reader) error {
 	spans := map[string]*Span{}
 	children := map[string][]*Span{}
 
+	i := 0
+
 	dec := json.NewDecoder(r)
 	for {
+		i++
 		var span Span
 		if err := dec.Decode(&span); err != nil {
 			if errors.Is(err, io.EOF) {
 				break
 			}
 
-			return err
+			return fmt.Errorf("line %d: %w", i, err)
 		}
 
 		spans[span.SpanContext.SpanID] = &span
@@ -76,15 +79,25 @@ func mainE(w io.Writer, r io.Reader) error {
 	}
 
 	fmt.Fprint(w, header)
-	for _, rootSpan := range rootSpans {
-		root := &Node{
-			Span: rootSpan,
-		}
 
-		buildTree(root, children, spans)
-
-		writeSpan(w, nil, root)
+	root := &Node{
+		Span: &Span{
+			Name: "root",
+			SpanContext: SpanContext{
+				SpanID: "0000000000000000",
+			},
+		},
 	}
+
+	for _, rootSpan := range rootSpans {
+		root.Children = append(root.Children, &Node{
+			Span: rootSpan,
+		})
+	}
+
+	buildTree(root, children, spans)
+
+	writeSpan(w, nil, root)
 
 	fmt.Fprint(w, footer)
 	return nil
@@ -142,7 +155,12 @@ func writeSpan(w io.Writer, parent, node *Node) {
 	if len(node.Children) == 0 {
 		fmt.Fprintf(w, `<span>%s %s</span>`, node.Span.Name, dur)
 	} else {
-		fmt.Fprintf(w, `<details><summary>%s %s</summary>`, node.Span.Name, dur)
+		if parent == nil {
+			// Default to root being open.
+			fmt.Fprintf(w, `<details open><summary>%s %s</summary>`, node.Span.Name, dur)
+		} else {
+			fmt.Fprintf(w, `<details><summary>%s %s</summary>`, node.Span.Name, dur)
+		}
 		for _, child := range node.Children {
 			writeSpan(w, node, child)
 		}
